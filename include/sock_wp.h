@@ -17,6 +17,7 @@ extern "C" {
 }
 
 #include "openssl/ssl.h"
+#include "openssl/err.h"
 
 #include <iostream>
 #include <string>
@@ -27,6 +28,9 @@ extern "C" {
 namespace http {
 
 auto logger = getLogger(); // Log to console
+
+#define MSG_ERRNO(err) err << __FUNCTION__ << ":" << __LINE__ << ":" << strerror(errno)
+#define MSG_ERR(err, text) err << __FUNCTION__ << ":" << __LINE__ << ":" << text
 
 static constexpr int HTTPS_PORT = 443;
 static constexpr int HTTP_PORT = 80;
@@ -51,14 +55,6 @@ std::string err2str(Status status) {
 	}
 }
 
-std::string errno2str(Status status) {
-	std::stringstream ss;
-
-	ss << err2str(status) << ": " << strerror(errno);
-
-	return ss.str();
-}
-
 bool validateIP(const std::string& s) {
 	return true;
 }
@@ -74,9 +70,11 @@ protected:
 public:
 	SocketWrapper() = delete;
 	SocketWrapper(int domain, int type, int protocol) : _sockAddr{0} {
+		std::stringstream err_str;
 		_sockfd = socket(domain, type, protocol);
 		if (_sockfd == -1) {
-			throw std::invalid_argument(errno2str(Status::RC_SOCKET_ERROR));
+			MSG_ERRNO(err_str);
+			throw std::invalid_argument(err_str.str());
 		}
 	}
 
@@ -131,14 +129,18 @@ public:
 		_ctx(nullptr),
 		_ssl(nullptr) {
 
+		std::stringstream err_str;
+
 		auto host = gethostbyname(url.c_str());
 		if (host == nullptr) {
-			throw std::invalid_argument(errno2str(Status::RC_SOCKET_HOST));
+			MSG_ERRNO(err_str);
+			throw std::invalid_argument(err_str.str());
 		}
 
 		auto addr = reinterpret_cast<Addr**>(host->h_addr_list);
 		if (addr == nullptr) {
-			throw std::invalid_argument("Don't find IP address");
+			MSG_ERR(err_str, "Don't find IP address");
+			throw std::invalid_argument(err_str.str());
 		}
 
 		_sockAddr.sin_family = AF_INET;
@@ -150,7 +152,22 @@ public:
 		int err = connect(_sockfd, reinterpret_cast<SockAddr*>(&_sockAddr),
 				  sizeof(_sockAddr));
 		if (err != 0) {
-			throw std::invalid_argument(errno2str(Status::RC_SOCKET_CONNECT));
+			MSG_ERRNO(err_str);
+			throw std::invalid_argument(err_str.str());
+		}
+
+		const SSL_METHOD *method = TLS_client_method(); /* Create new client-method instance */
+
+		_ctx.reset(SSL_CTX_new(method));
+		if (_ctx.get() == nullptr) {
+			MSG_ERR(err_str, ERR_error_string(ERR_get_error(), NULL));
+			throw std::invalid_argument(err_str.str());
+		}
+
+		_ssl.reset(SSL_new(_ctx.get()));
+		if (_ssl.get() == nullptr) {
+			MSG_ERR(err_str, ERR_error_string(ERR_get_error(), NULL));
+			throw std::invalid_argument(err_str.str());
 		}
 
 		logger(DEBUG) << "Connection successful.";
