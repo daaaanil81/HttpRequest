@@ -72,6 +72,7 @@ protected:
 	int _sockfd;
 	SockAddrIn _sockAddr;
 public:
+	SocketWrapper() = delete;
 	SocketWrapper(int domain, int type, int protocol) : _sockAddr{0} {
 		_sockfd = socket(domain, type, protocol);
 		if (_sockfd == -1) {
@@ -101,10 +102,34 @@ public:
 	virtual ~TcpConnection() {}
 };
 
+struct Deleter_ssl_ctx {
+	void operator()(SSL_CTX* ctx) {
+		std::cout << "Deleter SSL_CTX" << std::endl;
+		SSL_CTX_free(ctx);
+	}
+};
+
+struct Deleter_ssl {
+	void operator()(SSL* ssl) {
+		std::cout << "Deleter SSL" << std::endl;
+		SSL_free(ssl);
+	}
+};
+
+void ssl_library_init() {
+	SSL_load_error_strings();
+	SSL_library_init();
+}
+
 class HttpConnection : public SocketWrapper {
+private:
+	std::unique_ptr<SSL_CTX, Deleter_ssl_ctx> _ctx;
+	std::unique_ptr<SSL, Deleter_ssl> _ssl;
 public:
-	explicit HttpConnection(const std::string& url, int port) :
-			 SocketWrapper{AF_INET, SOCK_STREAM, 0} {
+	explicit HttpConnection(const std::string& url, uint16_t port) :
+		SocketWrapper{AF_INET, SOCK_STREAM, 0},
+		_ctx(nullptr),
+		_ssl(nullptr) {
 
 		auto host = gethostbyname(url.c_str());
 		if (host == nullptr) {
@@ -118,13 +143,12 @@ public:
 
 		_sockAddr.sin_family = AF_INET;
 		_sockAddr.sin_addr = *addr[0];
-		_sockAddr.sin_port = port;
+		_sockAddr.sin_port = ntohs(port);
 
 		logger(DEBUG) << "Hostname: " << inet_ntoa(_sockAddr.sin_addr);
 
 		int err = connect(_sockfd, reinterpret_cast<SockAddr*>(&_sockAddr),
-						  sizeof(_sockAddr));
-		std::cout << "TEST" << std::endl;
+				  sizeof(_sockAddr));
 		if (err != 0) {
 			throw std::invalid_argument(errno2str(Status::RC_SOCKET_CONNECT));
 		}
