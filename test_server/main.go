@@ -1,18 +1,21 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 )
 
 func main() {
-	// Hello world, the web server
+
+	fmt.Println("Start simple http server :8080")
 
 	helloHandler := func(w http.ResponseWriter, req *http.Request) {
-		io.WriteString(w, "Hello, world!\n")
+		fmt.Println("Connected " + req.RemoteAddr)
+		io.WriteString(w, "Connected "+req.RemoteAddr+"\n")
 	}
 
-	http.HandleFunc("/hello", helloHandler)
+	http.HandleFunc("/", helloHandler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
